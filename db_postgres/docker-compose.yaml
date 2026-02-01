@@ -1,0 +1,75 @@
+services:
+  postgres_master:
+    image: postgres:17
+    container_name: postgres_master
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGDATA: ${PGDATA}
+      FILES_DIR: ${FILES_DIR}
+      DUMP_FILE: ${DUMP_FILE}
+    ports:
+      - "${MASTER_PORT}:5432"
+    volumes:
+      - pg_master_data:${PGDATA}
+      - ./${DUMP_FILE}:${FILES_DIR}/999_${DUMP_FILE}:ro
+      - ./${SH_FILE}:${AUTO_RUN_DIR}/001_${SH_FILE}:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB && [ -f $${PGDATA}/.db_init_complete ]"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+    # СИНХРОННАЯ РЕПЛИКА
+  postgres_sync:
+    image: postgres:17
+    container_name: postgres_sync
+    depends_on:
+      postgres_master:
+        condition: service_healthy
+    env_file: .env
+    ports:
+      - "${SYNC_PORT}:5432"
+    volumes:
+      - pg_sync_data:${PGDATA}
+    entrypoint:
+      - bash
+      - -c
+      - |
+        if [ -z "$$(ls -A $${PGDATA})" ]; then
+          export PGPASSWORD=$$POSTGRES_PASSWORD 
+          pg_basebackup -h postgres_master -D $${PGDATA} -U $$POSTGRES_USER -vP -R -S replica_sync_slot
+        fi
+        # Запуск с указанием имени для мастера
+        exec docker-entrypoint.sh postgres -c application_name=replica_sync
+
+
+  # АСИНХРОННАЯ РЕПЛИКА
+  postgres_async:
+    image: postgres:17
+    container_name: postgres_async
+    depends_on:
+      postgres_master:
+        condition: service_healthy
+    env_file: .env
+    ports:
+      - "${ASYNC_PORT}:5432"
+    volumes:
+      - pg_async_data:${PGDATA}
+    entrypoint:
+      - bash
+      - -c
+      - |
+        if [ -z "$$(ls -A $${PGDATA})" ]; then
+          export PGPASSWORD=$$POSTGRES_PASSWORD 
+          pg_basebackup -h postgres_master -D $${PGDATA} -U $$POSTGRES_USER -vP -R -S replica_async_slot
+        fi
+        # Имя отличается, поэтому мастер не будет её ждать
+        exec docker-entrypoint.sh postgres -c application_name=replica_async
+
+volumes:
+  pg_master_data:
+  pg_sync_data:
+  pg_async_data:
