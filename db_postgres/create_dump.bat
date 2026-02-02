@@ -1,8 +1,25 @@
 @echo off
 setlocal enabledelayedexpansion
 
-:: 1. Укажите путь к папке bin вашего PostgreSQL
-set PG_BIN="C:\Users\Dima\AppData\Roaming\DBeaverData\drivers\clients\postgresql\win\17"
+:: 1. Автоматический поиск пути к последней версии клиента
+set "BASE_PG_PATH=%APPDATA%\DBeaverData\drivers\clients\postgresql\win"
+
+if exist "%BASE_PG_PATH%" (
+    :: Ищем самую свежую папку (версию) по дате/имени
+    for /f "delims=" %%i in ('dir "%BASE_PG_PATH%" /b /ad /o-n') do (
+        set "PG_BIN=%BASE_PG_PATH%\%%i"
+        goto :found
+    )
+)
+
+:found
+if "%PG_BIN%"=="" (
+    echo [ERROR] PostgreSQL client not found in %BASE_PG_PATH%
+    pause
+    exit /b
+)
+
+echo [INFO] Using PG Bin: %PG_BIN%
 
 :: 2. Чтение .env файла
 if not exist .env (
@@ -32,7 +49,7 @@ echo [INFO] Connecting to %MASTER_PORT% as %POSTGRES_USER%...
 :: 4. Запуск бэкапа
 :: Используем переменные из .env: MASTER_PORT, POSTGRES_USER, POSTGRES_PASSWORD
 set PGPASSWORD=%POSTGRES_PASSWORD%
-%PG_BIN%\pg_dumpall.exe -h localhost -p %MASTER_PORT% -U %POSTGRES_USER% --clean --file="%BACKUP_NAME%"
+%PG_BIN%\pg_dumpall.exe -h %DUMP_HOST% -p %MASTER_PORT% -U %POSTGRES_USER% --clean --file="%BACKUP_NAME%"
 
 if %ERRORLEVEL% equ 0 (
     echo [SUCCESS] Backup created: %BACKUP_NAME%
